@@ -1,0 +1,4 @@
+# requirements.txt 예시
+streamlit
+pandas
+numpy
