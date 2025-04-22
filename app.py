@@ -2,6 +2,8 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import datetime
+import smtplib
+from email.mime.text import MIMEText
 from io import StringIO
 import os
 
@@ -100,6 +102,8 @@ for ticker, df in mock_data.items():
     colored_conds = {k: '✅' if v else '❌' for k, v in conds.items()}
 
     latest_close = df['Close'].iloc[-1]
+    today_open = df['Open'].iloc[-1]
+    change_from_open = (latest_close - today_open) / today_open * 100
     future_5d = df['Close'].shift(-5).iloc[-1] if len(df) >= 131 else np.nan
     future_10d = df['Close'].shift(-10).iloc[-1] if len(df) >= 136 else np.nan
     profit_5d = ((future_5d - latest_close) / latest_close * 100) if not np.isnan(future_5d) else np.nan
@@ -111,6 +115,7 @@ for ticker, df in mock_data.items():
         'Score': score,
         'Signal': signal,
         'Price': round(latest_close, 2),
+        'Change From Open (%)': round(change_from_open, 2),
         'Profit_5d (%)': round(profit_5d, 2) if profit_5d is not None else None,
         'Profit_10d (%)': round(profit_10d, 2) if profit_10d is not None else None,
         **colored_conds
@@ -131,6 +136,21 @@ st.dataframe(summary_df, use_container_width=True)
 
 csv = summary_df.to_csv(index=False).encode('utf-8')
 st.download_button("📥 결과 다운로드 (CSV)", csv, "screener_results.csv", "text/csv")
+
+# 📧 이메일 알림 기능 (mock for now)
+def send_email(subject, body, to="sungsoo81@gmail.com"):
+    msg = MIMEText(body)
+    msg["Subject"] = subject
+    msg["From"] = "notifier@example.com"
+    msg["To"] = to
+    print(f"이메일 전송됨 → {to}\n제목: {subject}\n내용: {body}")
+
+# 이메일 알림 조건 수정
+if any(summary_df['Signal'].str.contains("매수")):
+    send_email("📈 매수 추천 종목 있음", "오늘 매수 고려 종목이 발견되었습니다.")
+
+elif any(summary_df['Change From Open (%)'] < -5):
+    send_email("📉 매도 경고 발생", "일부 종목이 당일 기준 -5% 이상 하락하였습니다. 주의하세요.")
 
 # 성과 요약 통계
 st.subheader("📈 누적 추천 성과 분석")
@@ -158,8 +178,10 @@ if selected:
     st.subheader(f"{selected} - 차트 및 시그널 분석")
     df = mock_data[selected].copy()
     st.line_chart(df[['Close', 'MA20', 'MA50', 'MA200']].dropna())
-    st.line_chart(df[['RSI', 'MACD', 'MACD_signal']].dropna())
-    st.line_chart(df[['Stoch_K', 'Stoch_D']].dropna())
+    with st.expander("📉 RSI / MACD / Stochastic 변화 추이 보기"):
+        st.line_chart(df[['RSI']].dropna())
+        st.line_chart(df[['MACD', 'MACD_signal']].dropna())
+        st.line_chart(df[['Stoch_K', 'Stoch_D']].dropna())
 
     conds, score, signal = evaluate_conditions(df)
     st.markdown(f"### 시그널: **{signal}**")
