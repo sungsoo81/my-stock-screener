@@ -112,10 +112,18 @@ else:
 log_df.to_csv(log_file, index=False)
 
 st.subheader("📊 오늘의 추천 종목")
-st.dataframe(summary_df.style.applymap(
-    lambda v: 'color: green' if isinstance(v, (int, float)) and v > 0 else 'color: red' if isinstance(v, (int, float)) and v < 0 else None,
-    subset=['Change From Open (%)']
-), use_container_width=True)
+
+if not summary_df.empty and 'Change From Open (%)' in summary_df.columns:
+    st.dataframe(
+        summary_df.style.applymap(
+            lambda v: 'color: green' if isinstance(v, (int, float)) and v > 0
+            else 'color: red' if isinstance(v, (int, float)) and v < 0 else None,
+            subset=['Change From Open (%)']
+        ),
+        use_container_width=True
+    )
+else:
+    st.dataframe(summary_df, use_container_width=True)
 
 csv = summary_df.to_csv(index=False, encoding='utf-8-sig').encode('utf-8-sig')
 st.download_button("📥 결과 다운로드 (CSV)", csv, "screener_results.csv", "text/csv")
