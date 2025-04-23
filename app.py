@@ -3,14 +3,10 @@ import pandas as pd
 import numpy as np
 import datetime
 import yfinance as yf
-import smtplib
-from email.mime.text import MIMEText
-from io import StringIO
 import os
 
-# ------------------------ REAL DATA ------------------------
-@st.cache_data
-
+# ------------------------ DATA FETCHING ------------------------
+@st.cache
 def load_real_data():
     from bs4 import BeautifulSoup
     import requests
@@ -20,30 +16,23 @@ def load_real_data():
         response = requests.get(url)
         soup = BeautifulSoup(response.text, 'html.parser')
         table = soup.find('table', {'id': 'constituents'})
-        tickers = pd.read_html(str(table))[0]['Symbol'].tolist()
-        tickers = [t.replace('.', '-') for t in tickers]
-        return tickers
+        return pd.read_html(str(table))[0]['Symbol'].str.replace('.', '-').tolist()
 
     def fetch_nasdaq_tickers():
         url = 'https://en.wikipedia.org/wiki/NASDAQ-100'
         response = requests.get(url)
         soup = BeautifulSoup(response.text, 'html.parser')
         table = soup.find('table', {'id': 'constituents'})
-        tickers = pd.read_html(str(table))[0]['Ticker'].tolist()
-        tickers = [t.replace('.', '-') for t in tickers]
-        return tickers
+        return pd.read_html(str(table))[0]['Ticker'].str.replace('.', '-').tolist()
 
     def fetch_russell_tickers():
-        # 임시로 예시 ticker 50개 (Russell 2000 실시간은 외부 API 필요)
         return ['AAPL', 'MSFT', 'GOOGL', 'AMZN', 'NVDA', 'INTC', 'TSLA', 'META', 'CRM', 'ADBE',
                 'PYPL', 'CSCO', 'PEP', 'COST', 'QCOM', 'AVGO', 'TXN', 'AMAT', 'AMD', 'INTU',
                 'BKNG', 'ISRG', 'ADP', 'MU', 'FISV', 'KLAC', 'MRVL', 'LRCX', 'IDXX', 'ILMN',
                 'ASML', 'CDNS', 'WDAY', 'ANSS', 'MCHP', 'ROST', 'CTSH', 'NXPI', 'SIRI', 'VRSK',
                 'EBAY', 'WBA', 'MAR', 'BIDU', 'EXC', 'CHTR', 'XEL', 'EA', 'DLTR', 'SWKS']
 
-    tickers = fetch_sp500_tickers() + fetch_nasdaq_tickers() + fetch_russell_tickers()  # 상위 50개만 테스트용
-
-    tickers = fetch_sp500_tickers()
+    tickers = list(set(fetch_sp500_tickers() + fetch_nasdaq_tickers() + fetch_russell_tickers()))
     end = datetime.date.today()
     start = end - datetime.timedelta(days=180)
 
@@ -100,7 +89,6 @@ st.title("📈 전략형 미국 주식 스크리너 (S&P 500, NASDAQ, Russell 20
 
 summary = []
 today = datetime.date.today().isoformat()
-log_file = "daily_recommendations.csv"
 
 for ticker, df in real_data.items():
     conds, score, signal = evaluate_conditions(df)
@@ -109,10 +97,6 @@ for ticker, df in real_data.items():
         latest_close = df['Close'].iloc[-1]
         today_open = df['Open'].iloc[-1]
         change_from_open = (latest_close - today_open) / today_open * 100
-        future_5d = df['Close'].shift(-5).iloc[-1] if len(df) >= 131 else np.nan
-        future_10d = df['Close'].shift(-10).iloc[-1] if len(df) >= 136 else np.nan
-        profit_5d = ((future_5d - latest_close) / latest_close * 100) if not np.isnan(future_5d) else np.nan
-        profit_10d = ((future_10d - latest_close) / latest_close * 100) if not np.isnan(future_10d) else np.nan
 
         row = {
             'Date': today,
@@ -121,23 +105,14 @@ for ticker, df in real_data.items():
             'Signal': signal,
             'Price': round(latest_close, 2),
             'Change From Open (%)': round(change_from_open, 2),
-            'Profit_5d (%)': round(profit_5d, 2) if profit_5d is not None else None,
-            'Profit_10d (%)': round(profit_10d, 2) if profit_10d is not None else None,
             **colored_conds
         }
         summary.append(row)
 
 summary_df = pd.DataFrame(summary)
-if os.path.exists(log_file):
-    log_df = pd.read_csv(log_file)
-    log_df = pd.concat([log_df, summary_df], ignore_index=True)
-else:
-    log_df = summary_df.copy()
-log_df.to_csv(log_file, index=False)
-
 st.subheader("📊 오늘의 추천 종목")
 
-if not summary_df.empty and 'Change From Open (%)' in summary_df.columns:
+if not summary_df.empty:
     st.dataframe(
         summary_df.style.applymap(
             lambda v: 'color: green' if isinstance(v, (int, float)) and v > 0
@@ -146,37 +121,13 @@ if not summary_df.empty and 'Change From Open (%)' in summary_df.columns:
         ),
         use_container_width=True
     )
+
+    excel_bytes = summary_df.to_excel(index=False, engine='openpyxl')
+    st.download_button(
+        "📥 추천 종목 다운로드 (Excel)",
+        excel_bytes,
+        "screener_results.xlsx",
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
 else:
-    st.dataframe(summary_df, use_container_width=True)
-
-csv = summary_df.to_csv(index=False, encoding='utf-8-sig').encode('utf-8-sig')
-st.download_button("📥 결과 다운로드 (CSV)", csv, "screener_results.csv", "text/csv")
-
-if not summary_df.empty:
-    def send_email(subject, body, to="sungsoo81@gmail.com"):
-        msg = MIMEText(body)
-        msg["Subject"] = subject
-        msg["From"] = "notifier@example.com"
-        msg["To"] = to
-        print(f"이메일 전송됨 → {to}\n제목: {subject}\n내용: {body}")
-
-    send_email("📈 매수 추천 종목 있음", "오늘 매수 고려 종목이 발견되었습니다.")
-
-elif not summary_df.empty and 'Change From Open (%)' in summary_df.columns and any(summary_df['Change From Open (%)'] < -5):
-    send_email("📉 매도 경고 발생", "일부 종목이 당일 기준 -5% 이상 하락하였습니다. 주의하세요.")
-
-if not summary_df.empty:
-    selected = st.selectbox("📌 종목 상세 보기", summary_df['Ticker'])
-    if selected:
-        st.subheader(f"{selected} - 차트 및 시그널 분석")
-        df = real_data[selected].copy()
-        st.line_chart(df[['Close', 'MA20', 'MA50', 'MA200']].dropna())
-        with st.expander("📉 RSI / MACD / Stochastic 변화 추이 보기"):
-            st.line_chart(df[['RSI']].dropna())
-            st.line_chart(df[['MACD', 'MACD_signal']].dropna())
-            st.line_chart(df[['Stoch_K', 'Stoch_D']].dropna())
-
-        conds, score, signal = evaluate_conditions(df)
-        st.markdown(f"### 시그널: **{signal}**")
-        with st.expander("조건 세부 내용"):
-            st.json({k: ('✅' if v else '❌') for k, v in conds.items()})
+    st.info("오늘은 조건을 충족하는 종목이 없습니다.")
