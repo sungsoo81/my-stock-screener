@@ -5,18 +5,8 @@ import datetime
 import yfinance as yf
 import os
 
-
-
-def evaluate_conditions(df):
-    # 🔒 데이터 프레임 비어있거나 컬럼 없을 경우 즉시 차단
-    if df is None or df.empty or 'Close' not in df.columns:
-        return {}, 0, "❌ 데이터 없음"
-
-    if len(df) < 30 or df['Close'].isna().sum() > 0:
-        return {}, 0, "❌ 데이터 부족"
-
 # ------------------------ DATA FETCHING ------------------------
-@st.cache
+@st.cache_data
 def load_real_data():
     from bs4 import BeautifulSoup
     import requests
@@ -49,9 +39,10 @@ def load_real_data():
     data = {}
     for ticker in tickers:
         df = yf.download(ticker, start=start, end=end)
-        df.dropna(subset=['Close'], inplace=True)
-        if df.empty:
+        if df.empty or 'Close' not in df.columns:
             continue
+        df.dropna(subset=['Close'], inplace=True)
+
         df['MA20'] = df['Close'].rolling(20).mean()
         df['MA50'] = df['Close'].rolling(50).mean()
         df['MA200'] = df['Close'].rolling(200).mean()
@@ -70,13 +61,15 @@ def load_real_data():
 
 # ------------------------ FILTERING ------------------------
 def evaluate_conditions(df):
+    if df is None or df.empty or 'Close' not in df.columns:
+        return {}, 0, "❌ 데이터 없음"
+
     if len(df) < 30 or df['Close'].isna().sum() > 0:
         return {}, 0, "❌ 데이터 부족"
 
     latest = df.iloc[-1]
     recent_closes = df['Close'].tail(20)
 
-    # 보조 함수
     def safe_bool(val):
         if isinstance(val, (bool, np.bool_)):
             return val
@@ -87,7 +80,6 @@ def evaluate_conditions(df):
         except:
             return False
 
-    # 안전한 계산
     try:
         close_increase_5d = safe_bool(all(np.diff(recent_closes.tail(5)) > 0))
     except:
@@ -98,16 +90,13 @@ def evaluate_conditions(df):
     except:
         close_increase_4w = False
 
-    # 조건 계산 (모든 값은 무조건 bool로 변환)
     conditions = {
         'avg_vol_above_500k': safe_bool(latest.get('VolumeAvg', 0) >= 500_000),
         'above_52w_low_30pct': safe_bool(latest['Close'] / df['Close'].min() >= 1.3),
         'close_up_5d': close_increase_5d,
         'close_up_4w': close_increase_4w,
         'above_ma20': safe_bool(latest['Close'] > latest['MA20']),
-        'ma20>ma50>ma200': safe_bool(
-            latest.get('MA20', 0) > latest.get('MA50', 0) and latest.get('MA50', 0) > latest.get('MA200', 0)
-        ),
+        'ma20>ma50>ma200': safe_bool(latest.get('MA20', 0) > latest.get('MA50', 0) and latest.get('MA50', 0) > latest.get('MA200', 0)),
         'rsi_ok': safe_bool(latest.get('RSI', 70) < 70),
         'macd_cross': safe_bool(latest.get('MACD', 0) > latest.get('MACD_signal', 0)),
         'stoch_cross': safe_bool(latest.get('Stoch_K', 0) > latest.get('Stoch_D', 0)),
@@ -115,14 +104,12 @@ def evaluate_conditions(df):
         'inst_buy': True
     }
 
-    # 여기에서 확실하게 리스트로 강제 변환 후 bool만 평가
     bool_values = [safe_bool(v) for v in conditions.values()]
     all_pass = all(bool_values)
     score = sum(bool_values)
     signal = "✅ 강한 매수 고려" if all_pass else "❌ 제외 (필수 조건 미충족)"
 
     return conditions, score, signal
-
 
 # ------------------------ STREAMLIT UI ------------------------
 real_data = load_real_data()
