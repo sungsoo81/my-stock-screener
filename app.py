@@ -2,32 +2,56 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import datetime
+import yfinance as yf
 import smtplib
 from email.mime.text import MIMEText
 from io import StringIO
 import os
 
-# ------------------------ MOCK DATA ------------------------
+# ------------------------ REAL DATA ------------------------
 @st.cache_data
 
-def load_mock_data():
-    np.random.seed(42)
-    tickers = ['AAPL', 'MSFT', 'GOOGL', 'AMZN', 'NVDA']
-    dates = pd.date_range(end=datetime.date.today(), periods=126, freq='B')
+def load_real_data():
+    from bs4 import BeautifulSoup
+    import requests
 
-    mock_data = {}
+    def fetch_sp500_tickers():
+        url = 'https://en.wikipedia.org/wiki/List_of_S%26P_500_companies'
+        response = requests.get(url)
+        soup = BeautifulSoup(response.text, 'html.parser')
+        table = soup.find('table', {'id': 'constituents'})
+        tickers = pd.read_html(str(table))[0]['Symbol'].tolist()
+        tickers = [t.replace('.', '-') for t in tickers]
+        return tickers
+
+    def fetch_nasdaq_tickers():
+        url = 'https://en.wikipedia.org/wiki/NASDAQ-100'
+        response = requests.get(url)
+        soup = BeautifulSoup(response.text, 'html.parser')
+        table = soup.find('table', {'id': 'constituents'})
+        tickers = pd.read_html(str(table))[0]['Ticker'].tolist()
+        tickers = [t.replace('.', '-') for t in tickers]
+        return tickers
+
+    def fetch_russell_tickers():
+        # 임시로 예시 ticker 50개 (Russell 2000 실시간은 외부 API 필요)
+        return ['AAPL', 'MSFT', 'GOOGL', 'AMZN', 'NVDA', 'INTC', 'TSLA', 'META', 'CRM', 'ADBE',
+                'PYPL', 'CSCO', 'PEP', 'COST', 'QCOM', 'AVGO', 'TXN', 'AMAT', 'AMD', 'INTU',
+                'BKNG', 'ISRG', 'ADP', 'MU', 'FISV', 'KLAC', 'MRVL', 'LRCX', 'IDXX', 'ILMN',
+                'ASML', 'CDNS', 'WDAY', 'ANSS', 'MCHP', 'ROST', 'CTSH', 'NXPI', 'SIRI', 'VRSK',
+                'EBAY', 'WBA', 'MAR', 'BIDU', 'EXC', 'CHTR', 'XEL', 'EA', 'DLTR', 'SWKS']
+
+    tickers = fetch_sp500_tickers() + fetch_nasdaq_tickers() + fetch_russell_tickers()  # 상위 50개만 테스트용
+
+    tickers = fetch_sp500_tickers()
+    end = datetime.date.today()
+    start = end - datetime.timedelta(days=180)
+
+    data = {}
     for ticker in tickers:
-        price = 100 + np.cumsum(np.random.normal(0, 1, len(dates)))
-        volume = np.random.randint(300_000, 2_000_000, len(dates))
-        df = pd.DataFrame({
-            'Date': dates,
-            'Close': price,
-            'High': price + np.random.uniform(0, 2, len(dates)),
-            'Low': price - np.random.uniform(0, 2, len(dates)),
-            'Open': price + np.random.uniform(-1, 1, len(dates)),
-            'Volume': volume,
-        }).set_index('Date')
-
+        df = yf.download(ticker, start=start, end=end)
+        if df.empty:
+            continue
         df['MA20'] = df['Close'].rolling(20).mean()
         df['MA50'] = df['Close'].rolling(50).mean()
         df['MA200'] = df['Close'].rolling(200).mean()
@@ -41,8 +65,8 @@ def load_mock_data():
                         (df['High'].rolling(14).max() - df['Low'].rolling(14).min())
         df['Stoch_D'] = df['Stoch_K'].rolling(3).mean()
         df['VolumeAvg'] = df['Volume'].rolling(20).mean()
-        mock_data[ticker] = df
-    return mock_data
+        data[ticker] = df
+    return data
 
 # ------------------------ FILTERING ------------------------
 def evaluate_conditions(df):
@@ -71,14 +95,14 @@ def evaluate_conditions(df):
     return conditions, score, signal
 
 # ------------------------ STREAMLIT UI ------------------------
-mock_data = load_mock_data()
+real_data = load_real_data()
 st.title("📈 전략형 미국 주식 스크리너 (S&P 500, NASDAQ, Russell 2000)")
 
 summary = []
 today = datetime.date.today().isoformat()
 log_file = "daily_recommendations.csv"
 
-for ticker, df in mock_data.items():
+for ticker, df in real_data.items():
     conds, score, signal = evaluate_conditions(df)
     if signal == "✅ 강한 매수 고려":
         colored_conds = {k: '✅' if v else '❌' for k, v in conds.items()}
@@ -128,9 +152,7 @@ else:
 csv = summary_df.to_csv(index=False, encoding='utf-8-sig').encode('utf-8-sig')
 st.download_button("📥 결과 다운로드 (CSV)", csv, "screener_results.csv", "text/csv")
 
-# 이메일 알림
 if not summary_df.empty:
-    from email.mime.text import MIMEText
     def send_email(subject, body, to="sungsoo81@gmail.com"):
         msg = MIMEText(body)
         msg["Subject"] = subject
@@ -143,12 +165,11 @@ if not summary_df.empty:
 elif not summary_df.empty and 'Change From Open (%)' in summary_df.columns and any(summary_df['Change From Open (%)'] < -5):
     send_email("📉 매도 경고 발생", "일부 종목이 당일 기준 -5% 이상 하락하였습니다. 주의하세요.")
 
-# 상세 분석
 if not summary_df.empty:
     selected = st.selectbox("📌 종목 상세 보기", summary_df['Ticker'])
     if selected:
         st.subheader(f"{selected} - 차트 및 시그널 분석")
-        df = mock_data[selected].copy()
+        df = real_data[selected].copy()
         st.line_chart(df[['Close', 'MA20', 'MA50', 'MA200']].dropna())
         with st.expander("📉 RSI / MACD / Stochastic 변화 추이 보기"):
             st.line_chart(df[['RSI']].dropna())
