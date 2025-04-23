@@ -3,9 +3,8 @@ import pandas as pd
 import numpy as np
 import datetime
 import yfinance as yf
-import os
+from io import BytesIO
 
-# ------------------------ DATA FETCHING ------------------------
 @st.cache_data
 def load_real_data():
     from bs4 import BeautifulSoup
@@ -59,7 +58,6 @@ def load_real_data():
         data[ticker] = df
     return data
 
-# ------------------------ FILTERING ------------------------
 def evaluate_conditions(df):
     if df is None or df.empty or 'Close' not in df.columns:
         return {}, 0, "❌ 데이터 없음"
@@ -150,7 +148,10 @@ if not summary_df.empty:
         use_container_width=True
     )
 
-    excel_bytes = summary_df.to_excel(index=False, engine='openpyxl')
+    excel_buffer = BytesIO()
+    summary_df.to_excel(excel_buffer, index=False, engine='openpyxl')
+    excel_bytes = excel_buffer.getvalue()
+
     st.download_button(
         "📥 추천 종목 다운로드 (Excel)",
         excel_bytes,
