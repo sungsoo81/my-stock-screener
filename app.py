@@ -140,7 +140,7 @@ if not summary_df.empty:
 
     send_email("📈 매수 추천 종목 있음", "오늘 매수 고려 종목이 발견되었습니다.")
 
-elif any(summary_df['Change From Open (%)'] < -5):
+elif not summary_df.empty and 'Change From Open (%)' in summary_df.columns and any(summary_df['Change From Open (%)'] < -5):
     send_email("📉 매도 경고 발생", "일부 종목이 당일 기준 -5% 이상 하락하였습니다. 주의하세요.")
 
 # 상세 분석
