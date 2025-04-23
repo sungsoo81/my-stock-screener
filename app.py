@@ -59,10 +59,21 @@ def load_real_data():
 
 # ------------------------ FILTERING ------------------------
 def evaluate_conditions(df):
+    if len(df) < 30 or df['Close'].isna().sum() > 0:
+        return {}, 0, "❌ 데이터 부족"
+
     latest = df.iloc[-1]
     recent_closes = df['Close'].tail(20)
-    close_increase_5d = all(np.diff(recent_closes.tail(5)) > 0)
-    close_increase_4w = recent_closes.pct_change(20).iloc[-1] > 0
+
+    try:
+        close_increase_5d = all(np.diff(recent_closes.tail(5)) > 0)
+    except Exception:
+        close_increase_5d = False
+
+    try:
+        close_increase_4w = recent_closes.pct_change(20).iloc[-1] > 0
+    except Exception:
+        close_increase_4w = False
 
     conditions = {
         'avg_vol_above_500k': latest['VolumeAvg'] >= 500_000,
