@@ -5,6 +5,16 @@ import datetime
 import yfinance as yf
 import os
 
+
+
+def evaluate_conditions(df):
+    # 🔒 데이터 프레임 비어있거나 컬럼 없을 경우 즉시 차단
+    if df is None or df.empty or 'Close' not in df.columns:
+        return {}, 0, "❌ 데이터 없음"
+
+    if len(df) < 30 or df['Close'].isna().sum() > 0:
+        return {}, 0, "❌ 데이터 부족"
+
 # ------------------------ DATA FETCHING ------------------------
 @st.cache
 def load_real_data():
@@ -39,6 +49,7 @@ def load_real_data():
     data = {}
     for ticker in tickers:
         df = yf.download(ticker, start=start, end=end)
+        df.dropna(subset=['Close'], inplace=True)
         if df.empty:
             continue
         df['MA20'] = df['Close'].rolling(20).mean()
