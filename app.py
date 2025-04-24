@@ -7,27 +7,9 @@ from io import BytesIO
 
 @st.cache_data
 def load_real_data():
-    import requests
-    from bs4 import BeautifulSoup
+    with open("tickers.txt", "r") as f:
+        tickers = list(set([line.strip() for line in f if line.strip()]))
 
-    def fetch_sp500_tickers():
-        url = 'https://en.wikipedia.org/wiki/List_of_S%26P_500_companies'
-        response = requests.get(url)
-        soup = BeautifulSoup(response.text, 'html.parser')
-        table = soup.find('table', {'id': 'constituents'})
-        return pd.read_html(str(table))[0]['Symbol'].str.replace('.', '-').tolist()
-
-    def fetch_nasdaq_tickers():
-        url = 'https://en.wikipedia.org/wiki/NASDAQ-100'
-        response = requests.get(url)
-        soup = BeautifulSoup(response.text, 'html.parser')
-        table = soup.find('table', {'id': 'constituents'})
-        return pd.read_html(str(table))[0]['Ticker'].str.replace('.', '-').tolist()
-
-    def fetch_russell_tickers():
-        return ['AAPL', 'MSFT', 'GOOGL', 'AMZN', 'NVDA', 'INTC', 'TSLA', 'META', 'CRM', 'ADBE']
-
-    tickers = list(set(fetch_sp500_tickers() + fetch_nasdaq_tickers() + fetch_russell_tickers()))
     end = datetime.date.today()
     start = end - datetime.timedelta(days=180)
 
@@ -52,7 +34,6 @@ def load_real_data():
                             (df['High'].rolling(14).max() - df['Low'].rolling(14).min())
             df['Stoch_D'] = df['Stoch_K'].rolling(3).mean()
             df['VolumeAvg'] = df['Volume'].rolling(20).mean()
-
             data[ticker] = df
         except Exception as e:
             print(f"⚠️ {ticker} 오류: {e}")
@@ -82,7 +63,7 @@ def evaluate_conditions(df):
         close_increase_5d = False
 
     try:
-        close_increase_4w = safe_bool(recent_closes.pct_change(20).iloc[-1] > 0)
+        close_increase_4w = safe_bool(recent_cles.pct_change(20).iloc[-1] > 0)
     except:
         close_increase_4w = False
 
@@ -108,7 +89,7 @@ def evaluate_conditions(df):
 
 # ------------------------ STREAMLIT UI ------------------------
 real_data = load_real_data()
-st.title("📈 전략형 미국 주식 스크리너")
+st.title("📈 전략형 미국 주식 스크리너 (tickers.txt 기반)")
 
 summary = []
 today = datetime.date.today().isoformat()
