@@ -14,11 +14,21 @@ def load_real_data():
     start = end - datetime.timedelta(days=180)
 
     data = {}
+    failed_download = []
+    missing_close = []
+    empty_frame = []
+    success = []
+
     for ticker in tickers:
         try:
-            df = yf.download(ticker, start=start, end=end)
-            if df.empty or 'Close' not in df.columns:
+            df = yf.download(ticker, start=start, end=end, progress=False, auto_adjust=False)
+            if df.empty:
+                empty_frame.append(ticker)
                 continue
+            if 'Close' not in df.columns:
+                missing_close.append(ticker)
+                continue
+
             df.dropna(subset=['Close'], inplace=True)
 
             df['MA20'] = df['Close'].rolling(20).mean()
@@ -34,11 +44,15 @@ def load_real_data():
                             (df['High'].rolling(14).max() - df['Low'].rolling(14).min())
             df['Stoch_D'] = df['Stoch_K'].rolling(3).mean()
             df['VolumeAvg'] = df['Volume'].rolling(20).mean()
+
             data[ticker] = df
+            success.append(ticker)
         except Exception as e:
-            print(f"⚠️ {ticker} 오류: {e}")
+            print(f"❌ {ticker} 다운로드 실패: {e}")
+            failed_download.append(ticker)
             continue
-    return data
+
+    return data, success, failed_download, empty_frame, missing_close
 
 def evaluate_conditions(df):
     if df is None or df.empty or 'Close' not in df.columns:
@@ -63,7 +77,7 @@ def evaluate_conditions(df):
         close_increase_5d = False
 
     try:
-        close_increase_4w = safe_bool(recent_cles.pct_change(20).iloc[-1] > 0)
+        close_increase_4w = safe_bool(recent_closes.pct_change(20).iloc[-1] > 0)
     except:
         close_increase_4w = False
 
@@ -88,8 +102,8 @@ def evaluate_conditions(df):
     return conditions, score, signal
 
 # ------------------------ STREAMLIT UI ------------------------
-real_data = load_real_data()
-st.title("📈 전략형 미국 주식 스크리너 (tickers.txt 기반)")
+real_data, success, failed, empty, no_close = load_real_data()
+st.title("📈 전략형 주식 스크리너 (tickers.txt 기반)")
 
 summary = []
 today = datetime.date.today().isoformat()
@@ -136,3 +150,19 @@ if not summary_df.empty:
     )
 else:
     st.info("오늘은 조건을 충족하는 종목이 없습니다.")
+
+# ------------------------ 결과 정리 ------------------------
+st.subheader("📁 티커 다운로드 상태 요약")
+st.markdown(f"✅ 성공: {len(success)}개")
+st.markdown(f"❌ 실패: {len(failed)}개")
+st.markdown(f"⚠️ 빈 데이터: {len(empty)}개")
+st.markdown(f"⚠️ 'Close' 없음: {len(no_close)}개")
+
+with st.expander("❌ 실패한 티커 목록"):
+    st.write(failed)
+
+with st.expander("📉 데이터가 비어있는 티커"):
+    st.write(empty)
+
+with st.expander("🔍 'Close' 컬럼이 누락된 티커"):
+    st.write(no_close)
