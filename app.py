@@ -7,8 +7,8 @@ from io import BytesIO
 
 @st.cache_data
 def load_real_data():
-    from bs4 import BeautifulSoup
     import requests
+    from bs4 import BeautifulSoup
 
     def fetch_sp500_tickers():
         url = 'https://en.wikipedia.org/wiki/List_of_S%26P_500_companies'
@@ -25,11 +25,7 @@ def load_real_data():
         return pd.read_html(str(table))[0]['Ticker'].str.replace('.', '-').tolist()
 
     def fetch_russell_tickers():
-        return ['AAPL', 'MSFT', 'GOOGL', 'AMZN', 'NVDA', 'INTC', 'TSLA', 'META', 'CRM', 'ADBE',
-                'PYPL', 'CSCO', 'PEP', 'COST', 'QCOM', 'AVGO', 'TXN', 'AMAT', 'AMD', 'INTU',
-                'BKNG', 'ISRG', 'ADP', 'MU', 'FISV', 'KLAC', 'MRVL', 'LRCX', 'IDXX', 'ILMN',
-                'ASML', 'CDNS', 'WDAY', 'ANSS', 'MCHP', 'ROST', 'CTSH', 'NXPI', 'SIRI', 'VRSK',
-                'EBAY', 'WBA', 'MAR', 'BIDU', 'EXC', 'CHTR', 'XEL', 'EA', 'DLTR', 'SWKS']
+        return ['AAPL', 'MSFT', 'GOOGL', 'AMZN', 'NVDA', 'INTC', 'TSLA', 'META', 'CRM', 'ADBE']
 
     tickers = list(set(fetch_sp500_tickers() + fetch_nasdaq_tickers() + fetch_russell_tickers()))
     end = datetime.date.today()
@@ -37,33 +33,35 @@ def load_real_data():
 
     data = {}
     for ticker in tickers:
-        df = yf.download(ticker, start=start, end=end)
-        if df.empty or 'Close' not in df.columns:
-            continue
-        df.dropna(subset=['Close'], inplace=True)
+        try:
+            df = yf.download(ticker, start=start, end=end)
+            if df.empty or 'Close' not in df.columns:
+                continue
+            df.dropna(subset=['Close'], inplace=True)
 
-        df['MA20'] = df['Close'].rolling(20).mean()
-        df['MA50'] = df['Close'].rolling(50).mean()
-        df['MA200'] = df['Close'].rolling(200).mean()
-        df['RSI'] = 100 - (100 / (1 + df['Close'].pct_change().rolling(14).apply(
-            lambda x: (x[x > 0].mean() / -x[x < 0].mean()) if -x[x < 0].mean() != 0 else np.nan)))
-        exp1 = df['Close'].ewm(span=12, adjust=False).mean()
-        exp2 = df['Close'].ewm(span=26, adjust=False).mean()
-        df['MACD'] = exp1 - exp2
-        df['MACD_signal'] = df['MACD'].ewm(span=9, adjust=False).mean()
-        df['Stoch_K'] = 100 * (df['Close'] - df['Low'].rolling(14).min()) / \
-                        (df['High'].rolling(14).max() - df['Low'].rolling(14).min())
-        df['Stoch_D'] = df['Stoch_K'].rolling(3).mean()
-        df['VolumeAvg'] = df['Volume'].rolling(20).mean()
-        data[ticker] = df
+            df['MA20'] = df['Close'].rolling(20).mean()
+            df['MA50'] = df['Close'].rolling(50).mean()
+            df['MA200'] = df['Close'].rolling(200).mean()
+            df['RSI'] = 100 - (100 / (1 + df['Close'].pct_change().rolling(14).apply(
+                lambda x: (x[x > 0].mean() / -x[x < 0].mean()) if -x[x < 0].mean() != 0 else np.nan)))
+            exp1 = df['Close'].ewm(span=12, adjust=False).mean()
+            exp2 = df['Close'].ewm(span=26, adjust=False).mean()
+            df['MACD'] = exp1 - exp2
+            df['MACD_signal'] = df['MACD'].ewm(span=9, adjust=False).mean()
+            df['Stoch_K'] = 100 * (df['Close'] - df['Low'].rolling(14).min()) / \
+                            (df['High'].rolling(14).max() - df['Low'].rolling(14).min())
+            df['Stoch_D'] = df['Stoch_K'].rolling(3).mean()
+            df['VolumeAvg'] = df['Volume'].rolling(20).mean()
+
+            data[ticker] = df
+        except Exception as e:
+            print(f"⚠️ {ticker} 오류: {e}")
+            continue
     return data
 
 def evaluate_conditions(df):
     if df is None or df.empty or 'Close' not in df.columns:
         return {}, 0, "❌ 데이터 없음"
-
-    if len(df) < 30 or df['Close'].isna().sum() > 0:
-        return {}, 0, "❌ 데이터 부족"
 
     latest = df.iloc[-1]
     recent_closes = df['Close'].tail(20)
@@ -93,8 +91,8 @@ def evaluate_conditions(df):
         'above_52w_low_30pct': safe_bool(latest['Close'] / df['Close'].min() >= 1.3),
         'close_up_5d': close_increase_5d,
         'close_up_4w': close_increase_4w,
-        'above_ma20': safe_bool(latest['Close'] > latest['MA20']),
-        'ma20>ma50>ma200': safe_bool(latest.get('MA20', 0) > latest.get('MA50', 0) and latest.get('MA50', 0) > latest.get('MA200', 0)),
+        'above_ma20': safe_bool(latest['Close'] > latest.get('MA20', 0)),
+        'ma20>ma50>ma200': safe_bool(latest.get('MA20', 0) > latest.get('MA50', 0) > latest.get('MA200', 0)),
         'rsi_ok': safe_bool(latest.get('RSI', 70) < 70),
         'macd_cross': safe_bool(latest.get('MACD', 0) > latest.get('MACD_signal', 0)),
         'stoch_cross': safe_bool(latest.get('Stoch_K', 0) > latest.get('Stoch_D', 0)),
@@ -106,12 +104,11 @@ def evaluate_conditions(df):
     all_pass = all(bool_values)
     score = sum(bool_values)
     signal = "✅ 강한 매수 고려" if all_pass else "❌ 제외 (필수 조건 미충족)"
-
     return conditions, score, signal
 
 # ------------------------ STREAMLIT UI ------------------------
 real_data = load_real_data()
-st.title("📈 전략형 미국 주식 스크리너 (S&P 500, NASDAQ, Russell 2000)")
+st.title("📈 전략형 미국 주식 스크리너")
 
 summary = []
 today = datetime.date.today().isoformat()
@@ -148,14 +145,12 @@ if not summary_df.empty:
         use_container_width=True
     )
 
-    excel_buffer = BytesIO()
-    summary_df.to_excel(excel_buffer, index=False, engine='openpyxl')
-    excel_bytes = excel_buffer.getvalue()
-
+    buffer = BytesIO()
+    summary_df.to_excel(buffer, index=False, engine='openpyxl')
     st.download_button(
         "📥 추천 종목 다운로드 (Excel)",
-        excel_bytes,
-        "screener_results.xlsx",
+        buffer.getvalue(),
+        "recommendations.xlsx",
         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     )
 else:
